@@ -1,0 +1,35 @@
+services:
+  isaac-sim:
+    image: nvcr.io/nvidia/isaac-sim:${ISAAC_SIM_VERSION:-4.1.0}
+    container_name: isaac-sim
+    environment:
+      - ACCEPT_EULA=${ACCEPT_EULA:-Y}
+      - PRIVACY_CONSENT=Y
+      - DISPLAY=${DISPLAY}
+      - WAYLAND_DISPLAY=${WAYLAND_DISPLAY}
+      - XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR}
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+      - OMNI_KIT_ALLOW_ROOT=1
+    volumes:
+      # Display
+      - /tmp/.X11-unix:/tmp/.X11-unix
+      - ${XDG_RUNTIME_DIR}/${WAYLAND_DISPLAY}:${XDG_RUNTIME_DIR}/${WAYLAND_DISPLAY}
+      # Shared memory and persistence
+      - /dev/shm:/dev/shm
+      - ../data:/root/isaac-sim/kit/data
+      - ../assets:/root/isaac-sim/assets
+      - ../configs:/root/isaac-sim/configs
+      # Hardware
+      - /dev:/dev
+    network_mode: host
+    devices:
+      - nvidia.com/gpu=all
+    entrypoint:
+      - /bin/bash
+      - -c
+      - |
+        # Wait for potential display initialization
+        sleep 2
+        # Use ./isaac-sim.sh for native GUI, or ./runheadless.native.sh for streaming
+        ./isaac-sim.sh
