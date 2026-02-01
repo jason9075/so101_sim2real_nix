@@ -52,6 +52,31 @@ Isaac Sim 的 Docker Image 存放於 NVIDIA NGC (nvcr.io)，啟動前需進行�
    ```
    *註：初次啟動會編譯 Shader，可能需要 1-3 分鐘，請使用 `make logs` 觀察進度。*
 
+### 4. 運行 Sim-to-Real Bridge
+
+本專案採用 Client-Server 架構以分離硬體通訊與模擬邏輯：
+- **Host Driver**: 運行於 Host 端，負責讀取 USB Serial 數據並透過 ZMQ 發送。
+- **Sim Server**: 運行於 Container 內，負責接收數據並驅動模擬機器人。
+
+**步驟 A: 啟動 Sim Server (Container 端)**
+這將在 Isaac Sim 內啟動 Python 腳本並等待 ZMQ 連線：
+```bash
+make sim
+```
+
+**步驟 B: 啟動 Host Driver (Host 端)**
+開啟新的終端機，執行以下指令發送數據：
+
+- **測試模式 (Mock Data)**: 發送正弦波訊號
+  ```bash
+  make bridge
+  ```
+
+- **實機模式**: 連接真實手臂
+  ```bash
+  python3 scripts/bridge/host_driver.py --port /dev/ttyACM0
+  ```
+
 ## 🛠 常用指令 (Makefile)
 
 本專案使用 `Makefile` 封裝常用操作：
@@ -63,6 +88,8 @@ Isaac Sim 的 Docker Image 存放於 NVIDIA NGC (nvcr.io)，啟動前需進行�
 | `make logs` | 查看容器日誌 |
 | `make shell` | 進入容器終端機 |
 | `make clean` | 清除 `data/` 中的暫存數據 |
+| `make sim` | 啟動容器內的模擬伺服器 (Server) |
+| `make bridge` | 啟動 Host 端的硬體驅動 (Client, Mock Mode) |
 
 ## 📁 目錄結構
 

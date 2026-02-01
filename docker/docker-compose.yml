@@ -17,9 +17,10 @@ services:
       - ${XDG_RUNTIME_DIR}/${WAYLAND_DISPLAY}:${XDG_RUNTIME_DIR}/${WAYLAND_DISPLAY}
       # Shared memory and persistence
       - /dev/shm:/dev/shm
-      - ../data:/root/isaac-sim/kit/data
-      - ../assets:/root/isaac-sim/assets
-      - ../configs:/root/isaac-sim/configs
+      - ../data:/isaac-sim/my_data
+      - ../assets:/isaac-sim/assets
+      - ../configs:/isaac-sim/configs
+      - ../scripts:/isaac-sim/scripts_local
       # Hardware
       - /dev:/dev
     network_mode: host
@@ -29,7 +30,6 @@ services:
       - /bin/bash
       - -c
       - |
-        # Wait for potential display initialization
-        sleep 2
-        # Use ./isaac-sim.sh for native GUI, or ./runheadless.native.sh for streaming
-        ./isaac-sim.sh
+        # Standby Mode: Keep container alive but idle
+        echo "Container started in standby mode. Use 'make gui' or 'make sim' to launch applications."
+        sleep infinity

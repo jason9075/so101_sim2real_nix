@@ -23,7 +23,11 @@
             xorg.xhost
             # Hardware communication helpers
             setserial
-            python3
+            (python3.withPackages (ps: with ps; [
+              pyserial
+              pyzmq
+              numpy
+            ]))
           ];
 
           shellHook = ''

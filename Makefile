@@ -10,26 +10,34 @@ DOCKER_COMPOSE = docker-compose -f docker/docker-compose.yml
 
 help:
 	@echo "Available targets:"
-	@echo "  up      - Start Isaac Sim container"
+	@echo "  up      - Start Isaac Sim container (Standby Mode)"
 	@echo "  down    - Stop Isaac Sim container"
+	@echo "  gui     - Launch Isaac Sim GUI (Standard)"
+	@echo "  sim     - Launch Sim Server (Bridge Mode)"
+	@echo "  bridge  - Launch Host Driver (Client)"
 	@echo "  logs    - Show container logs"
 	@echo "  shell   - Enter container shell"
-	@echo "  clean   - Remove data and logs"
 
 up:
 	@echo "Enabling Xhost for container access..."
 	@xhost +local:root || true
 	$(DOCKER_COMPOSE) up -d
-	@echo "Isaac Sim is starting. Use 'make logs' to monitor progress."
+	@echo "Container started in standby mode. Run 'make gui' or 'make sim' to start applications."
 
 down:
 	$(DOCKER_COMPOSE) down
 
-logs:
-	$(DOCKER_COMPOSE) logs -f
+gui:
+	@echo "Starting Isaac Sim GUI..."
+	docker exec -it isaac-sim /isaac-sim/isaac-sim.sh
 
-shell:
-	docker exec -it isaac-sim /bin/bash
+sim:
+	@echo "Installing pyzmq in container (if needed)..."
+	docker exec isaac-sim /isaac-sim/python.sh -m pip install pyzmq
+	@echo "Starting Sim Server..."
+	docker exec -it isaac-sim /isaac-sim/python.sh /isaac-sim/scripts_local/bridge/sim_server.py
 
-clean:
-	rm -rf data/* logs/*
+bridge:
+	@echo "Starting Host Driver (Mock Mode)..."
+	python3 scripts/bridge/host_driver.py --mock
+
