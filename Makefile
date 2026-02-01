@@ -38,6 +38,9 @@ sim:
 	docker exec -it isaac-sim /isaac-sim/python.sh /isaac-sim/scripts_local/bridge/sim_server.py
 
 bridge:
+	@echo "Starting Host Driver (Leader)..."
+	python3 scripts/bridge/host_driver.py --port /dev/ttyACM1
+
+bridge-mock:
 	@echo "Starting Host Driver (Mock Mode)..."
 	python3 scripts/bridge/host_driver.py --mock
-

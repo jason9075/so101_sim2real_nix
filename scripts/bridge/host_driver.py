@@ -147,8 +147,9 @@ def main():
 
     logger.info("Starting bridge loop... (Press Ctrl+C to stop)")
     
-    # Store last known positions to avoid jitter on packet loss
-    last_joints = [0.0] * 6
+    # Store last smoothed positions to avoid jitter
+    last_smoothed_joints = [0.0] * 6
+    alpha = 0.3 # Smoothing factor (0.0 to 1.0, lower is smoother)
     
     try:
         while True:
@@ -174,11 +175,13 @@ def main():
                     for i in range(1, 7):
                         val = arm.read_joint(i)
                         if val is None:
-                            # If read fails, use last known value
-                            temp_joints.append(last_joints[i-1])
+                            # If read fails, use last SMOOTHED value
+                            temp_joints.append(last_smoothed_joints[i-1])
                         else:
-                            temp_joints.append(val)
-                            last_joints[i-1] = val
+                            # Apply Low-Pass Filter
+                            smoothed_val = alpha * val + (1 - alpha) * last_smoothed_joints[i-1]
+                            temp_joints.append(smoothed_val)
+                            last_smoothed_joints[i-1] = smoothed_val
                 else:
                     # Should not reach here unless logic error
                     time.sleep(1)

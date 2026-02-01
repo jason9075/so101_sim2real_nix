@@ -4,6 +4,7 @@
 # Project Specific
 data/
 logs/
+assets/
 
 # Nix
 result

@@ -99,6 +99,10 @@ make sim
 - `scripts/`: 宿主機使用的 Python/Bash 輔助腳本。
 - `data/`: 數據採集結果（由容器映射出）。
 
+##    Assets
+
+- https://github.com/LightwheelAI/leisaac/releases
+
 ## 📝 開發規範
 
 請參考 [AGENTS.md](./AGENTS.md) 了解詳細的代碼風格、測試與建置規範。
