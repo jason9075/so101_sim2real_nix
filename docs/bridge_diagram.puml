@@ -1,0 +1,51 @@
+@startuml
+skinparam componentStyle rectangle
+skinparam backgroundColor white
+skinparam componentBackgroundColor #F0F8FF
+skinparam componentBorderColor #4682B4
+skinparam arrowColor #2F4F4F
+
+title Sim-to-Real Bridge Architecture
+
+package "Host (NixOS)" {
+    [Physical SO-101 Arm] as Arm #LightCoral
+    component "Host Driver" as Driver #LightGreen {
+        [Serial Interface]
+        [ZMQ Publisher]
+    }
+}
+
+package "Docker Container (Isaac Sim)" {
+    component "Sim Server" as Server #LightBlue {
+        [ZMQ Subscriber]
+        [Isaac Sim / USD Stage]
+        [Articulation Controller]
+    }
+    [Virtual Robot] as VirtualArm #LightYellow
+}
+
+Arm <--> [Serial Interface] : USB /dev/ttyACM* (1Mbps)
+note right on link
+  Feetech STS Protocol
+  (Binary)
+end note
+
+[Serial Interface] -> [ZMQ Publisher] : Parse & Convert
+note right of [Serial Interface]
+  0-4096 -> Radians
+end note
+
+[ZMQ Publisher] -right-> [ZMQ Subscriber] : TCP 127.0.0.1:5555
+note on link
+  JSON Payload:
+  {
+    "timestamp": ...,
+    "joints": [j1, j2...]
+  }
+end note
+
+[ZMQ Subscriber] -> [Articulation Controller] : Joint Targets
+[Articulation Controller] -> [Isaac Sim / USD Stage] : Drive API
+[Isaac Sim / USD Stage] -> VirtualArm : Physics Update
+
+@enduml
