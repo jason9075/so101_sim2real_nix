@@ -47,10 +47,10 @@ Isaac Sim 的 Docker Image 存放於 NVIDIA NGC (nvcr.io)，啟動前需進行�
    ```
 
 3. **啟動 Isaac Sim**:
-   ```bash
-   make up
-   ```
-   *註：初次啟動會編譯 Shader，可能需要 1-3 分鐘，請使用 `make logs` 觀察進度。*
+    ```bash
+    just up
+    ```
+    *註：初次啟動會編譯 Shader，可能需要 3-5 分鐘，請使用 `just logs` 觀察進度。*
 
 ### 4. 運行 Sim-to-Real Bridge
 
@@ -58,38 +58,50 @@ Isaac Sim 的 Docker Image 存放於 NVIDIA NGC (nvcr.io)，啟動前需進行�
 - **Host Driver**: 運行於 Host 端，負責讀取 USB Serial 數據並透過 ZMQ 發送。
 - **Sim Server**: 運行於 Container 內，負責接收數據並驅動模擬機器人。
 
-**步驟 A: 啟動 Sim Server (Container 端)**
-這將在 Isaac Sim 內啟動 Python 腳本並等待 ZMQ 連線：
+#### 模式 A: WebRTC 遠端串流 (推薦)
+這是在 Headless 環境下的標準開發流程：
+1. **啟動 Sim Server**:
+   ```bash
+   just webrtc
+   ```
+2. **連線**: 使用 [Isaac Sim WebRTC Streaming Client](https://docs.omniverse.nvidia.com/isaacsim/latest/installation/install_streaming.html#isaac-sim-webrtc-streaming-client) 連接至 `127.0.0.1`。
+   - 此模式已配置為載入完整編輯器 (Full Editor)。
+   - 確保已開啟連接埠：UDP 47998, TCP 49100。
+
+#### 模式 B: 本地 X11 視窗
+若您在具備顯示器的本地機器執行：
 ```bash
-make sim
+just sim
 ```
 
-**步驟 B: 啟動 Host Driver (Host 端)**
+### 5. 啟動 Host Driver (Host 端)
 開啟新的終端機，執行以下指令發送數據：
 
 - **測試模式 (Mock Data)**: 發送正弦波訊號
   ```bash
-  make bridge
+  just bridge-mock
   ```
 
 - **實機模式**: 連接真實手臂
   ```bash
-  python3 scripts/bridge/host_driver.py --port /dev/ttyACM0
+  just bridge port=/dev/ttyACM0
   ```
 
-## 🛠 常用指令 (Makefile)
+## 🛠 常用指令 (Justfile)
 
-本專案使用 `Makefile` 封裝常用操作：
+本專案使用 `Justfile` 封裝常用操作：
 
 | 指令 | 說明 |
 | :--- | :--- |
-| `make up` | 啟動 Isaac Sim 容器 |
-| `make down` | 停止並移除容器 |
-| `make logs` | 查看容器日誌 |
-| `make shell` | 進入容器終端機 |
-| `make clean` | 清除 `data/` 中的暫存數據 |
-| `make sim` | 啟動容器內的模擬伺服器 (Server) |
-| `make bridge` | 啟動 Host 端的硬體驅動 (Client, Mock Mode) |
+| `just up` | 啟動 Isaac Sim 容器 |
+| `just down` | 停止並移除容器 |
+| `just logs` | 查看容器日誌 |
+| `just shell` | 進入容器終端機 |
+| `just webrtc` | 啟動 WebRTC 伺服器 (支援 WebRTC Client 連線) |
+| `just sim` | 啟動容器內的模擬伺服器 (X11 視窗模式) |
+| `just bridge-mock` | 啟動 Host 端的模擬硬體驅動 (Mock Mode) |
+| `just bridge` | 啟動 Host 端的硬體驅動 (需指定 port) |
+
 
 ## 📁 目錄結構
 

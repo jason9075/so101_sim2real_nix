@@ -11,24 +11,24 @@
 
 ## 2. 開發環境與指令 (Development Commands)
 
-本專案使用 `flake.nix` 進行環境編排，並以 `Makefile` 封裝常用指令。
+本專案使用 `flake.nix` 進行環境編排，並以 `Justfile` 封裝常用指令。
 
 ### 2.1 環境啟動
 - 進入開發環境：`nix develop`
-- 啟動 Isaac Sim：`docker-compose up -d`
-- 停止容器：`docker-compose down`
+- 啟動 Isaac Sim：`just up`
+- 停止容器：`just down`
 
 ### 2.2 建置、檢查與測試 (Build/Lint/Test)
-所有開發輔助指令應定義在 `Makefile` 中。以下為標準目標：
+所有開發輔助指令應定義在 `Justfile` 中。以下為標準目標：
 
 | 任務 | 指令 | 說明 |
 | :--- | :--- | :--- |
-| **Lint** | `make lint` | 執行 Python (ruff), C++ (clang-format), Bash (shellcheck) 檢查 |
-| **Format** | `make format` | 自動修復格式問題 |
-| **Test All** | `make test` | 執行所有單元測試 |
+| **Lint** | `just lint` | 執行 Python (ruff), C++ (clang-format), Bash (shellcheck) 檢查 |
+| **Format** | `just format` | 自動修復格式問題 |
+| **Test All** | `just test` | 執行所有單元測試 |
 | **Single Test**| `pytest <path_to_test>` | 執行特定 Python 測試檔 |
-| **Build** | `make build` | 編譯必要的 C++ 插件或輔助工具 |
-| **Clean** | `make clean` | 清除建置產物與暫存檔 |
+| **Build** | `just build` | 編譯必要的 C++ 插件或輔助工具 |
+| **Clean** | `just clean` | 清除建置產物與暫存檔 |
 
 ### 2.3 執行特定測試範例
 - **Python (單一函數)**: `pytest scripts/tests/test_hardware.py::test_serial_connection`
@@ -36,25 +36,26 @@
 - **C++**: `ctest -R <test_name>` (若有使用 CMake)
 - **Bash**: `shellcheck scripts/*.sh`
 
-### 2.4 Makefile 實作範例
-```makefile
-.PHONY: lint format test build clean
-
+### 2.4 Justfile 實作範例
+```just
+# Run linter
 lint:
-	ruff check .
-	clang-format --dry-run --Werror src/*.cpp
-	shellcheck scripts/*.sh
+    ruff check .
+    clang-format --dry-run --Werror src/*.cpp
+    shellcheck scripts/*.sh
 
+# Run formatter
 format:
-	ruff format .
-	clang-format -i src/*.cpp
+    ruff format .
+    clang-format -i src/*.cpp
 
+# Run all tests
 test:
-	pytest scripts/tests
-	# ctest --output-on-failure
+    pytest scripts/tests
 
+# Build components
 build:
-	mkdir -p build && cd build && cmake .. && make
+    mkdir -p build && cd build && cmake .. && make
 ```
 
 ## 3. 目錄結構規範 (Directory Structure)
@@ -67,7 +68,7 @@ build:
 - `data/`: 數據採集結果（由容器映射出），此目錄應列入 `.gitignore`。
 - `src/`: 存放 C++ 核心插件或高效能通訊組件。
 - `flake.nix`: 專案環境定義與依賴管理中心。
-- `Makefile`: 自動化任務定義。
+- `Justfile`: 自動化任務定義。
 
 ## 4. 代碼風格指引 (Code Style)
 
@@ -124,7 +125,7 @@ build:
 ## 7. AI Agent 專屬指令
 
 - 在修改代碼前，優先搜尋 `guidelines.md` 與現有 `flake.nix` 以確保符合專案慣例。
-- 產出代碼後，優先調用 `make lint` 進行自我驗證。
+- 產出代碼後，優先調用 `just lint` 進行自我驗證。
 - 若需新增依賴，請修改 `flake.nix` 並告知使用者。
 
 ## 8. 常見任務執行指南 (Common Tasks)

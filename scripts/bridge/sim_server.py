@@ -106,9 +106,34 @@ def configure_joint_drives(robot):
         logger.warning(f"Failed to set joint gains: {e}")
 
 def main():
-    # 1. Start Isaac Sim
+    # 1. Start Isaac Sim with WebRTC support if enabled
     from isaacsim import SimulationApp
-    kit = SimulationApp({"headless": False})
+    
+    # Check environment variables for streaming configuration
+    headless = os.getenv("HEADLESS", "False").lower() == "true"
+    enable_webrtc = os.getenv("ENABLE_WEBRTC", "False").lower() == "true"
+    
+    config = {
+        "headless": headless,
+        "width": 1280,
+        "height": 720,
+        "experience": "/isaac-sim/apps/isaacsim.exp.full.kit", # Use full editor experience
+    }
+    
+    if enable_webrtc:
+        # In 5.0.0, "webrtc" string is often more reliable than integer 1
+        config["livestream"] = "webrtc"
+        logger.info("Enabling WebRTC Livestreaming with Full Editor (Isaac Sim 5.0.0+)")
+
+    # Launch SimulationApp with explicit settings
+    kit = SimulationApp(config)
+    
+    # Manually ensure the WebRTC extension is enabled if not already
+    if enable_webrtc:
+        from omni.isaac.core.utils.extensions import enable_extension
+        enable_extension("omni.kit.livestream.webrtc")
+        # Optional: Also enable the services transport for better compatibility
+        enable_extension("omni.services.transport.server.http")
 
     from omni.isaac.core import World
     from omni.isaac.core.articulations import Articulation

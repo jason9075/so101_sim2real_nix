@@ -1,6 +1,6 @@
 services:
   isaac-sim:
-    image: nvcr.io/nvidia/isaac-sim:${ISAAC_SIM_VERSION:-4.1.0}
+    image: nvcr.io/nvidia/isaac-sim:${ISAAC_SIM_VERSION:-5.0.0}
     container_name: isaac-sim
     environment:
       - ACCEPT_EULA=${ACCEPT_EULA:-Y}
