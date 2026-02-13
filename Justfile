@@ -24,6 +24,19 @@ gui:
     @echo "Starting Isaac Sim GUI (Forcing X11)..."
     docker exec -it -e WAYLAND_DISPLAY="" isaac-sim /isaac-sim/isaac-sim.sh
 
+# Launch Isaac Sim GUI with Bridge & Robot Preset loaded
+gui-bridge:
+    @echo "Installing pyzmq in container (if needed)..."
+    docker exec isaac-sim /isaac-sim/python.sh -m pip install pyzmq
+    @echo "Starting Isaac Sim GUI with Bridge..."
+    docker exec -it \
+        -e WAYLAND_DISPLAY="" \
+        -e HEADLESS=False \
+        -e LD_LIBRARY_PATH=/run/opengl-driver/lib \
+        -e NVIDIA_VISIBLE_DEVICES=all \
+        -e NVIDIA_DRIVER_CAPABILITIES=all \
+        isaac-sim /isaac-sim/python.sh /isaac-sim/scripts_local/bridge/sim_server.py
+
 # Launch Sim Server (WebRTC Streaming) - Optimized for Isaac Sim 5.0.0
 webrtc:
     @echo "Installing pyzmq in container (if needed)..."
