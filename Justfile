@@ -37,6 +37,21 @@ gui-bridge:
         -e NVIDIA_DRIVER_CAPABILITIES=all \
         isaac-sim /isaac-sim/python.sh /isaac-sim/scripts_local/bridge/sim_server.py
 
+# Launch Isaac Sim GUI with Sim2Real stage loaded (sim2real.usd)
+gui-sim2real stage="/isaac-sim/assets/sim2real.usd" robot="/World/so101_follower":
+    @echo "Installing pyzmq in container (if needed)..."
+    docker exec isaac-sim /isaac-sim/python.sh -m pip install pyzmq
+    @echo "Starting Isaac Sim GUI with Sim2Real Stage..."
+    docker exec -it \
+        -e WAYLAND_DISPLAY="" \
+        -e HEADLESS=False \
+        -e ISAAC_STAGE_PATH={{stage}} \
+        -e ROBOT_PRIM_PATH={{robot}} \
+        -e LD_LIBRARY_PATH=/run/opengl-driver/lib \
+        -e NVIDIA_VISIBLE_DEVICES=all \
+        -e NVIDIA_DRIVER_CAPABILITIES=all \
+        isaac-sim /isaac-sim/python.sh /isaac-sim/scripts_local/bridge/sim_server.py
+
 # Launch Sim Server (WebRTC Streaming) - Optimized for Isaac Sim 5.0.0
 webrtc:
     @echo "Installing pyzmq in container (if needed)..."

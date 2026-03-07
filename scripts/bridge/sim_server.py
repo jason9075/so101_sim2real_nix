@@ -6,6 +6,8 @@ import zmq
 import json
 import os
 import logging
+from typing import Optional
+
 import numpy as np
 # from isaacsim import SimulationApp # Deferred import in main
 
@@ -17,13 +19,20 @@ def fix_robot_base(stage, robot_prim_path):
     """
     Fix the robot base to the world using a PhysicsFixedJoint.
     This prevents the robot from falling over without breaking the ArticulationView.
+
+    注意：若 base link 已經是 static/kinematic，則不應再嘗試建立 FixedJoint，
+    否則可能導致 PhysX 初始化失敗。
     """
     from pxr import UsdPhysics, Gf
-    
+
     # 1. Find the base link (usually the first rigid body)
     base_link_prim = None
     prim = stage.GetPrimAtPath(robot_prim_path)
-    
+
+    if not prim.IsValid():
+        logger.error(f"Robot prim path not found in stage: {robot_prim_path}")
+        return
+
     # Simple search for base_link or the first RigidBody
     # Often named "base_link", "base", or the root itself
     candidates = [prim] + list(prim.GetChildren())
@@ -44,13 +53,31 @@ def fix_robot_base(stage, robot_prim_path):
         logger.warning(f"Could not find a RigidBody to fix in {robot_prim_path}")
         return
 
+    rigid_body = UsdPhysics.RigidBodyAPI.Get(stage, base_link_prim.GetPath())
+    if rigid_body:
+        kinematic_attr = rigid_body.GetKinematicEnabledAttr()
+        if kinematic_attr and bool(kinematic_attr.Get()):
+            logger.info(
+                "Base link is kinematic; skip FixedJoint to avoid PhysX errors. "
+                f"prim={base_link_prim.GetPath()}"
+            )
+            return
+
+        enabled_attr = rigid_body.GetRigidBodyEnabledAttr()
+        if enabled_attr and not bool(enabled_attr.Get()):
+            logger.info(
+                "Base link rigid body disabled/static; skip FixedJoint. "
+                f"prim={base_link_prim.GetPath()}"
+            )
+            return
+
     logger.info(f"Fixing robot base via FixedJoint on: {base_link_prim.GetPath()}")
 
     # 2. Create a Fixed Joint connecting World to Base Link
     joint_path = f"{base_link_prim.GetPath()}/root_joint"
     if not stage.GetPrimAtPath(joint_path).IsValid():
         fixed_joint = UsdPhysics.FixedJoint.Define(stage, joint_path)
-        
+
         # Body 1 is the robot base
         fixed_joint.CreateBody1Rel().SetTargets([base_link_prim.GetPath()])
         
@@ -58,10 +85,50 @@ def fix_robot_base(stage, robot_prim_path):
         # Leaving Body0 empty implies attaching to the static world frame at local pos (0,0,0)
         
         # Ensure transform is identity
-        fixed_joint.CreateLocalPos0Attr().Set(Gf.Vec3f(0,0,0))
-        fixed_joint.CreateLocalRot0Attr().Set(Gf.Quatf(1,0,0,0))
-        fixed_joint.CreateLocalPos1Attr().Set(Gf.Vec3f(0,0,0))
-        fixed_joint.CreateLocalRot1Attr().Set(Gf.Quatf(1,0,0,0)) 
+        # fixed_joint.CreateLocalPos0Attr().Set(Gf.Vec3f(0,0,0))
+        # fixed_joint.CreateLocalRot0Attr().Set(Gf.Quatf(1,0,0,0))
+        # fixed_joint.CreateLocalPos1Attr().Set(Gf.Vec3f(0,0,0))
+        # fixed_joint.CreateLocalRot1Attr().Set(Gf.Quatf(1,0,0,0)) 
+
+def find_first_articulation_root(stage) -> Optional[str]:
+    """Return a likely Articulation root prim path.
+
+    Some assets apply `ArticulationRootAPI` on a rigid body (e.g. `/.../base`).
+    In that case, returning the parent Xform is often what Isaac Sim expects as
+    the `Articulation(prim_path=...)` root.
+    """
+
+    from pxr import Usd, UsdPhysics
+
+    for prim in Usd.PrimRange(stage.GetPseudoRoot()):
+        if not prim.HasAPI(UsdPhysics.ArticulationRootAPI):
+            continue
+
+        parent = prim.GetParent()
+        if parent.IsValid() and parent.GetPath() != stage.GetPseudoRoot().GetPath():
+            return str(parent.GetPath())
+
+        return str(prim.GetPath())
+
+    return None
+
+
+def open_stage(kit, stage_path: str) -> bool:
+    import omni.usd
+
+    logger.info(f"Opening stage: {stage_path}")
+    usd_context = omni.usd.get_context()
+    usd_context.open_stage(stage_path)
+
+    # Stage open is asynchronous; pump Kit updates.
+    for _ in range(120):
+        kit.update()
+        stage = usd_context.get_stage()
+        if stage is not None:
+            return True
+
+    return False
+
 
 def configure_joint_drives(robot):
     """
@@ -151,32 +218,90 @@ def main():
     logger.info("Connected to ZMQ Publisher")
 
     # 3. Setup World & Robot
+    stage_path = os.getenv("ISAAC_STAGE_PATH", "").strip()
+    robot_prim_path = os.getenv("ROBOT_PRIM_PATH", "").strip()
+
+    if stage_path:
+        if not os.path.exists(stage_path):
+            logger.error(f"Stage not found at {stage_path}")
+            kit.close()
+            return
+
+        if not open_stage(kit, stage_path):
+            logger.error(f"Failed to open stage: {stage_path}")
+            kit.close()
+            return
+
     world = World()
-    
-    # Check for SO-101 Follower USD
-    asset_path = "/isaac-sim/assets/so101_follower.usd"
+
     robot = None
-    is_custom_robot = False
-    
-    if os.path.exists(asset_path):
-        logger.info(f"Found custom asset at {asset_path}. Loading SO-101...")
-        add_reference_to_stage(usd_path=asset_path, prim_path="/World/SO101")
-        
-        # [Corrected Logic] Fix Root Link Kinematics
-        # We need to make sure the root link is fixed to the world
+    add_ground_plane = True
+
+    if stage_path:
         stage = get_current_stage()
-        fix_robot_base(stage, "/World/SO101")
-        
-        robot = Articulation(prim_path="/World/SO101", name="so101")
+
+        # Stage open is asynchronous; wait for expected prims to appear.
+        for _ in range(240):
+            if robot_prim_path:
+                prim = stage.GetPrimAtPath(robot_prim_path)
+                if prim.IsValid():
+                    break
+            else:
+                detected = find_first_articulation_root(stage)
+                if detected:
+                    robot_prim_path = detected
+                    break
+
+            kit.update()
+            stage = get_current_stage()
+
+        if robot_prim_path:
+            prim = stage.GetPrimAtPath(robot_prim_path)
+            if not prim.IsValid():
+                logger.warning(
+                    f"ROBOT_PRIM_PATH not found: {robot_prim_path}. Falling back to auto-detect."
+                )
+                robot_prim_path = ""
+
+        if not robot_prim_path:
+            robot_prim_path = find_first_articulation_root(stage) or ""
+
+        if not robot_prim_path:
+            logger.error(
+                "ROBOT_PRIM_PATH not set and no ArticulationRoot found in stage."
+            )
+            kit.close()
+            return
+
+        logger.info(f"Using robot prim path: {robot_prim_path}")
+        fix_robot_base(stage, robot_prim_path)
+
+        robot = Articulation(prim_path=robot_prim_path, name="so101")
         world.scene.add(robot)
-        is_custom_robot = True
+        add_ground_plane = False
     else:
-        logger.warning(f"Asset not found at {asset_path}. Fallback to Franka.")
-        from omni.isaac.franka import Franka
-        robot = Franka(prim_path="/World/Franka", name="franka")
-        world.scene.add(robot)
-    
-    world.scene.add_default_ground_plane()
+        # Check for SO-101 Follower USD
+        asset_path = "/isaac-sim/assets/so101_follower.usd"
+
+        if os.path.exists(asset_path):
+            logger.info(f"Found custom asset at {asset_path}. Loading SO-101...")
+            add_reference_to_stage(usd_path=asset_path, prim_path="/World/SO101")
+
+            # [Corrected Logic] Fix Root Link Kinematics
+            stage = get_current_stage()
+            fix_robot_base(stage, "/World/SO101")
+
+            robot = Articulation(prim_path="/World/SO101", name="so101")
+            world.scene.add(robot)
+        else:
+            logger.warning(f"Asset not found at {asset_path}. Fallback to Franka.")
+            from omni.isaac.franka import Franka
+
+            robot = Franka(prim_path="/World/Franka", name="franka")
+            world.scene.add(robot)
+
+    if add_ground_plane:
+        world.scene.add_default_ground_plane()
     
     # Reset triggers initialization
     try:
@@ -185,10 +310,15 @@ def main():
         logger.error(f"World Reset Failed: {e}")
         return
 
+    if robot:
+        try:
+            logger.info(f"Robot Num DOF: {robot.num_dof}")
+            logger.info(f"Robot DOF Names: {robot.dof_names}")
+        except Exception as e:
+            logger.warning(f"Failed to read robot DOF info: {e}")
+
     # Apply Controller Gains AFTER Reset (Runtime)
-    if is_custom_robot:
-        pass
-        # configure_joint_drives(robot)
+    # configure_joint_drives(robot)
     
     # 4. Main Loop
     while kit.is_running():
@@ -209,24 +339,17 @@ def main():
                 joints = data.get("joints", [])
                 
                 if robot:
-                    # Determine DOF based on robot type
-                    num_dof = robot.num_dof
-                    
-                    if num_dof == 9: # Franka (Fallback)
-                        if len(joints) >= 6:
-                            target_joints = np.zeros(9)
-                            target_joints[0:6] = joints[0:6]
-                            robot.set_joint_positions(target_joints)
-                    
-                    elif num_dof == 6: # SO-101 (Likely)
-                        if len(joints) >= 6:
-                            robot.set_joint_positions(np.array(joints[:6]))
-                            
-                    else: # Unknown or partial match
-                         if len(joints) <= num_dof:
-                             robot.set_joint_positions(np.array(joints))
-                         else:
-                             robot.set_joint_positions(np.array(joints[:num_dof]))
+                    try:
+                        current_positions = robot.get_joint_positions()
+                        target_positions = np.array(current_positions, copy=True)
+
+                        num_to_set = min(len(joints), robot.num_dof)
+                        if num_to_set > 0:
+                            target_positions[:num_to_set] = np.array(joints[:num_to_set])
+                            robot.set_joint_positions(target_positions)
+                    except Exception as e:
+                        logger.error(f"Failed to apply joint targets: {e}")
+
                 
                 # Print debug info (throttle)
                 if int(data["timestamp"] * 10) % 20 == 0:
