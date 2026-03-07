@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 from typing import Any, Callable, Optional, Sequence
 
 ApplyJointTargetsFn = Callable[[Any, Sequence[float]], None]
@@ -146,12 +147,45 @@ def configure_joint_drives(robot: Any) -> None:
 
 
 def setup_zmq_subscriber(address: str = 'tcp://127.0.0.1:5555') -> zmq.Socket:
-  context = zmq.Context()
+  context = zmq.Context.instance()
   socket = context.socket(zmq.SUB)
+  socket.setsockopt(zmq.LINGER, 0)
+
+  # Keep only latest messages.
+  try:
+    socket.setsockopt(zmq.RCVHWM, 1)
+    socket.setsockopt(zmq.CONFLATE, 1)
+  except Exception:
+    pass
+
   socket.connect(address)
   socket.setsockopt_string(zmq.SUBSCRIBE, '')
   logger.info('Connected to ZMQ Publisher')
   return socket
+
+
+def setup_zmq_publisher(bind_address: str = 'tcp://*:5556') -> zmq.Socket:
+  context = zmq.Context.instance()
+  socket = context.socket(zmq.PUB)
+  socket.setsockopt(zmq.LINGER, 0)
+
+  try:
+    socket.setsockopt(zmq.SNDHWM, 1)
+  except Exception:
+    pass
+
+  socket.bind(bind_address)
+  logger.info(f'ZMQ publisher bound to {bind_address}')
+  return socket
+
+
+def publish_positions(socket: zmq.Socket, positions: Sequence[float], *, seq: int) -> None:
+  payload = {
+    'timestamp': time.time(),
+    'seq': seq,
+    'joints': list(map(float, positions)),
+  }
+  socket.send_string(json.dumps(payload))
 
 
 def receive_latest_joints(socket: zmq.Socket) -> Optional[list[float]]:
@@ -312,8 +346,18 @@ def run_server(
   timeline = omni.timeline.get_timeline_interface()
   warmup_frames = int(os.getenv('SO101_WARMUP_FRAMES', '10'))
 
+  real2sim_enabled = os.getenv('REAL2SIM_SUB_ENABLED', 'True').lower() == 'true'
+  sim2real_enabled = os.getenv('SIM2REAL_PUB_ENABLED', 'True').lower() == 'true'
+  sim2real_bind = os.getenv('SIM2REAL_PUB_BIND', 'tcp://*:5556')
+  sim2real_rate_hz = int(os.getenv('SIM2REAL_PUB_RATE_HZ', '30'))
+  sim2real_rate_hz = max(1, sim2real_rate_hz)
+
   try:
-    socket = setup_zmq_subscriber()
+    sub_socket = setup_zmq_subscriber() if real2sim_enabled else None
+    pub_socket = setup_zmq_publisher(sim2real_bind) if sim2real_enabled else None
+    pub_seq = 0
+    pub_interval = 1.0 / float(sim2real_rate_hz)
+    next_pub_time = time.monotonic()
 
     world, robot, add_ground_plane = create_world_and_robot(kit)
 
@@ -350,7 +394,8 @@ def run_server(
 
       if not is_playing:
         # 停止/暫停時，不套用 teleop（避免 reset 後被舊 target 立刻覆寫）。
-        drain_socket(socket)
+        if sub_socket is not None:
+          drain_socket(sub_socket)
         kit.update()
         was_playing = False
 
@@ -375,8 +420,11 @@ def run_server(
 
           reset_on_resume = False
 
-        drain_socket(socket)
+        if sub_socket is not None:
+          drain_socket(sub_socket)
+
         remaining_warmup_frames = warmup_frames
+        next_pub_time = time.monotonic()
         was_playing = True
 
       world.step(render=True)
@@ -385,14 +433,28 @@ def run_server(
         remaining_warmup_frames -= 1
         continue
 
-      try:
-        joints = receive_latest_joints(socket)
-        if joints is None:
-          continue
+      if sub_socket is not None:
+        try:
+          joints = receive_latest_joints(sub_socket)
+          if joints is not None:
+            apply_joint_targets_fn(robot, joints)
+        except Exception as exc:
+          logger.error(f'Error in apply: {exc}')
 
-        apply_joint_targets_fn(robot, joints)
-      except Exception as exc:
-        logger.error(f'Error in loop: {exc}')
+      if pub_socket is not None:
+        now = time.monotonic()
+        if now >= next_pub_time:
+          next_pub_time = now + pub_interval
+
+          try:
+            positions = robot.get_joint_positions()
+            pos_arr = np.asarray(positions)
+            if pos_arr.ndim == 1 and pos_arr.size >= 6:
+              pub_seq += 1
+              publish_positions(pub_socket, pos_arr[:6].tolist(), seq=pub_seq)
+
+          except Exception as exc:
+            logger.error(f'Error in publish: {exc}')
 
   finally:
     kit.close()

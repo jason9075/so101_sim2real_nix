@@ -41,22 +41,32 @@ Arm <--> [Serial Interface] : USB /dev/ttyACM* (1Mbps)
 
 ## Components
 
-### 1. Host Driver (Client)
--   **Path**: `scripts/bridge/host_driver.py`
--   **Role**: Hardware Abstraction Layer.
--   **Function**:
-    -   Connects to the physical robot via Serial (`/dev/ttyACM*`) using the Feetech STS/SCS protocol.
-    -   Polls joint positions at high frequency (~100Hz+).
-    -   Converts raw integer values (0-4096) to Radians.
-    -   Publishes data as a JSON payload via a **ZMQ PUB** socket.
--   **Usage**:
-    ```bash
-    # Run with real hardware
-    python3 scripts/bridge/host_driver.py --port /dev/ttyACM0
+### 1. Host Drivers (Client)
 
-    # Run in Mock mode (generates sine waves)
-    make bridge
-    ```
+本專案以 `~/.cache/huggingface/lerobot/profile.json` 為單一事實來源，
+自動決定 leader/follower 的 serial port 與 calibration 檔案（避免接錯線造成暴衝）。
+
+-   **real2sim (Leader -> Sim)**
+    -   **Path**: `scripts/bridge/host_driver.py`
+    -   **Role**: Hardware reader.
+    -   **Function**:
+        -   Connects to the physical leader arm via Serial.
+        -   Applies leader calibration (`homing_offset`) so joint radians are *relative to calibrated center*.
+        -   Publishes joint angles as JSON via ZMQ PUB (`tcp://*:5555`).
+    -   **Usage**:
+        -   `just real2sim` (use profile.json, default leader is `/dev/ttyACM1`)
+        -   `just real2sim /dev/ttyACM1` (override)
+
+-   **sim2real (Sim -> Follower)**
+    -   **Path**: `scripts/bridge/follower_driver.py`
+    -   **Role**: Hardware writer.
+    -   **Function**:
+        -   Subscribes to joint targets from Isaac Sim via ZMQ SUB (`tcp://127.0.0.1:5556`).
+        -   Applies follower calibration (`homing_offset`, `range_min/max`) and writes STS goal position (Addr 42).
+        -   Deadman: timeout → soft-stop → torque disable.
+    -   **Usage**:
+        -   `just sim2real` (use profile.json, default follower is `/dev/ttyACM0`)
+        -   `just sim2real /dev/ttyACM0` (override)
 
 ### 2. Sim Server (Server)
 -   **Path**: `scripts/bridge/sim_server_physics.py` (default) / `scripts/bridge/sim_server_direct.py`
@@ -78,7 +88,9 @@ Arm <--> [Serial Interface] : USB /dev/ttyACM* (1Mbps)
 
 -   **Transport**: ZeroMQ (TCP)
 -   **Pattern**: Pub-Sub (Publisher-Subscriber)
--   **Address**: `tcp://127.0.0.1:5555`
+-   **Addresses**:
+    -   real2sim: `tcp://127.0.0.1:5555`
+    -   sim2real: `tcp://127.0.0.1:5556`
 -   **Payload Format**: JSON
     ```json
     {

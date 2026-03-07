@@ -6,16 +6,29 @@ Reads joint states from Feetech STS/SCS Servos (SO-101 Leader Arm)
 and publishes them via ZeroMQ.
 """
 
-import sys
-import time
+import argparse
 import json
 import logging
-import argparse
-import zmq
-import serial
-import struct
-import numpy as np
+import sys
+import time
+from pathlib import Path
 from typing import Optional
+
+import numpy as np
+import serial
+import zmq
+
+# Allow running as a script (not `python -m`).
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.bridge.calibration import JOINT_NAMES, load_calibration
+from scripts.bridge.profile_loader import (
+    DEFAULT_PROFILE_PATH,
+    PROFILE_PORT_SENTINEL,
+    find_profile,
+)
 
 # Configure logging
 logging.basicConfig(
@@ -54,11 +67,8 @@ class FeetechArm:
         total = sum(payload)
         return (~total) & 0xFF
 
-    def read_joint(self, servo_id: int) -> Optional[float]:
-        """
-        Reads position of a single servo.
-        Returns: Position in Radians or None if failed.
-        """
+    def read_joint_raw(self, servo_id: int) -> Optional[int]:
+        """Reads raw position (0-4095) of a single servo."""
         if not self.ser:
             return None
 
@@ -109,13 +119,7 @@ class FeetechArm:
             # Mask to 12-bit just in case
             raw_pos &= 0xFFF
             
-            # Convert to Radians
-            # Assuming 0-4096 maps to 0-2pi (approx)
-            # Center is 2048
-            # In Goro project: 2048 is Center (0 degrees)
-            # Direction may vary per joint, but let's send raw radian mapping first.
-            radians = (raw_pos - 2048) * (2 * np.pi / POS_RESOLUTION)
-            return radians
+            return int(raw_pos)
             
         except Exception as e:
             logger.error(f"Serial Error: {e}")
@@ -127,22 +131,60 @@ class FeetechArm:
 
 def main():
     parser = argparse.ArgumentParser(description="SO-101 Host Driver (Feetech)")
-    parser.add_argument("--port", type=str, default="/dev/ttyACM0", help="Serial port path")
+    parser.add_argument(
+        "--profile",
+        type=str,
+        default=DEFAULT_PROFILE_PATH,
+        help="LeRobot profile.json path",
+    )
+    parser.add_argument(
+        "--port",
+        type=str,
+        default=PROFILE_PORT_SENTINEL,
+        help="Serial port path ('__PROFILE__' = use profile.json)",
+    )
     parser.add_argument("--baud", type=int, default=1000000, help="Baudrate (Default 1M)")
     parser.add_argument("--zmq-port", type=int, default=5555, help="ZeroMQ PUB port")
     parser.add_argument("--mock", action="store_true", help="Use mock data")
     args = parser.parse_args()
 
+    # Resolve leader port + calibration from profile.json
+    leader_port = args.port
+    if leader_port == PROFILE_PORT_SENTINEL:
+        leader_port = ""
+    leader_calib = None
+
+    if not args.mock:
+        prof = find_profile(
+            "so101_leader",
+            profile_path=args.profile,
+            fallback_port="/dev/ttyACM1",
+        )
+        if not leader_port:
+            leader_port = prof.port
+
+        if prof.calib_path:
+            leader_calib = load_calibration(prof.calib_path)
+        else:
+            raise RuntimeError(
+                "Leader calibration path missing in profile.json; "
+                "run calibration first to avoid uncontrolled motion."
+            )
+
+        logger.info(f"Leader port: {leader_port}")
+        logger.info(f"Leader calib: {prof.calib_path}")
+
     # ZMQ Setup
     context = zmq.Context()
     socket = context.socket(zmq.PUB)
+    socket.setsockopt(zmq.LINGER, 0)
     socket.bind(f"tcp://*:{args.zmq_port}")
     logger.info(f"ZeroMQ Publisher bound to port {args.zmq_port}")
 
     # Arm Setup
     arm = None
     if not args.mock:
-        arm = FeetechArm(args.port, args.baud)
+        arm = FeetechArm(leader_port, args.baud)
         arm.connect()
 
     logger.info("Starting bridge loop... (Press Ctrl+C to stop)")
@@ -175,22 +217,32 @@ def main():
                 temp_joints = []
                 
                 if arm:
-                    for i in range(1, 7):
-                        val = arm.read_joint(i)
-                        if val is None:
-                            # If read fails, use last SMOOTHED value
-                            temp_joints.append(last_smoothed_joints[i-1])
-                        else:
-                            if not has_seed[i - 1]:
-                                # First valid sample: seed directly to avoid startup transient.
-                                smoothed_val = val
-                                has_seed[i - 1] = True
-                            else:
-                                # Apply Low-Pass Filter
-                                smoothed_val = alpha * val + (1 - alpha) * last_smoothed_joints[i-1]
+                    if leader_calib is None:
+                        time.sleep(1)
+                        continue
 
-                            temp_joints.append(smoothed_val)
-                            last_smoothed_joints[i-1] = smoothed_val
+                    for joint_index, joint_name in enumerate(JOINT_NAMES, start=1):
+                        raw = arm.read_joint_raw(joint_index)
+                        if raw is None:
+                            # If read fails, use last SMOOTHED value
+                            temp_joints.append(last_smoothed_joints[joint_index - 1])
+                            continue
+
+                        calib = leader_calib[joint_name]
+                        center_raw = calib.center_raw
+                        radians = (raw - center_raw) * (2 * np.pi / POS_RESOLUTION)
+
+                        if not has_seed[joint_index - 1]:
+                            smoothed_val = radians
+                            has_seed[joint_index - 1] = True
+                        else:
+                            smoothed_val = (
+                                alpha * radians
+                                + (1 - alpha) * last_smoothed_joints[joint_index - 1]
+                            )
+
+                        temp_joints.append(smoothed_val)
+                        last_smoothed_joints[joint_index - 1] = smoothed_val
                 else:
                     # Should not reach here unless logic error
                     time.sleep(1)

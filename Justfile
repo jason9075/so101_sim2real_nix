@@ -24,7 +24,9 @@ gui:
     @echo "Starting Isaac Sim GUI (Forcing X11)..."
     docker exec -it -e WAYLAND_DISPLAY="" isaac-sim /isaac-sim/isaac-sim.sh
 
-# Launch Isaac Sim GUI with Bridge & Robot Preset loaded (Default: Physics)
+# Launch Isaac Sim GUI with Bridge (scene A)
+# - real2sim: SUB 5555 -> control sim
+# - sim2real: PUB 5556 (30Hz) from sim state
 gui-bridge:
     @echo "Installing pyzmq in container (if needed)..."
     docker exec isaac-sim /isaac-sim/python.sh -m pip install pyzmq
@@ -32,6 +34,10 @@ gui-bridge:
     docker exec -it \
         -e WAYLAND_DISPLAY="" \
         -e HEADLESS=False \
+        -e REAL2SIM_SUB_ENABLED=True \
+        -e SIM2REAL_PUB_ENABLED=True \
+        -e SIM2REAL_PUB_RATE_HZ=30 \
+        -e SIM2REAL_PUB_BIND=tcp://*:5556 \
         -e LD_LIBRARY_PATH=/run/opengl-driver/lib \
         -e NVIDIA_VISIBLE_DEVICES=all \
         -e NVIDIA_DRIVER_CAPABILITIES=all \
@@ -45,40 +51,35 @@ gui-bridge-direct:
     docker exec -it \
         -e WAYLAND_DISPLAY="" \
         -e HEADLESS=False \
+        -e REAL2SIM_SUB_ENABLED=True \
+        -e SIM2REAL_PUB_ENABLED=True \
+        -e SIM2REAL_PUB_RATE_HZ=30 \
+        -e SIM2REAL_PUB_BIND=tcp://*:5556 \
         -e LD_LIBRARY_PATH=/run/opengl-driver/lib \
         -e NVIDIA_VISIBLE_DEVICES=all \
         -e NVIDIA_DRIVER_CAPABILITIES=all \
         isaac-sim /isaac-sim/python.sh /isaac-sim/scripts_local/bridge/sim_server_direct.py
 
-# Launch Isaac Sim GUI with Sim2Real stage loaded (Default: Physics)
-gui-sim2real stage="/isaac-sim/assets/sim2real.usd" robot="/World/so101_follower":
+# Launch Isaac Sim GUI with desk stage loaded (scene B)
+# - real2sim: SUB 5555 -> control sim
+# - sim2real: PUB 5556 (30Hz) from sim state
+gui-desk stage="/isaac-sim/assets/sim2real.usd" robot="/World/so101_follower":
     @echo "Installing pyzmq in container (if needed)..."
     docker exec isaac-sim /isaac-sim/python.sh -m pip install pyzmq
-    @echo "Starting Isaac Sim GUI with Sim2Real Stage (Physics)..."
+    @echo "Starting Isaac Sim GUI Desk (Physics)..."
     docker exec -it \
         -e WAYLAND_DISPLAY="" \
         -e HEADLESS=False \
+        -e REAL2SIM_SUB_ENABLED=True \
+        -e SIM2REAL_PUB_ENABLED=True \
+        -e SIM2REAL_PUB_RATE_HZ=30 \
+        -e SIM2REAL_PUB_BIND=tcp://*:5556 \
         -e ISAAC_STAGE_PATH={{stage}} \
         -e ROBOT_PRIM_PATH={{robot}} \
         -e LD_LIBRARY_PATH=/run/opengl-driver/lib \
         -e NVIDIA_VISIBLE_DEVICES=all \
         -e NVIDIA_DRIVER_CAPABILITIES=all \
         isaac-sim /isaac-sim/python.sh /isaac-sim/scripts_local/bridge/sim_server_physics.py
-
-# Launch Isaac Sim GUI with Sim2Real stage loaded (Direct: set_joint_positions)
-gui-sim2real-direct stage="/isaac-sim/assets/sim2real.usd" robot="/World/so101_follower":
-    @echo "Installing pyzmq in container (if needed)..."
-    docker exec isaac-sim /isaac-sim/python.sh -m pip install pyzmq
-    @echo "Starting Isaac Sim GUI with Sim2Real Stage (Direct)..."
-    docker exec -it \
-        -e WAYLAND_DISPLAY="" \
-        -e HEADLESS=False \
-        -e ISAAC_STAGE_PATH={{stage}} \
-        -e ROBOT_PRIM_PATH={{robot}} \
-        -e LD_LIBRARY_PATH=/run/opengl-driver/lib \
-        -e NVIDIA_VISIBLE_DEVICES=all \
-        -e NVIDIA_DRIVER_CAPABILITIES=all \
-        isaac-sim /isaac-sim/python.sh /isaac-sim/scripts_local/bridge/sim_server_direct.py
 
 # Launch Sim Server (WebRTC Streaming) - Optimized for Isaac Sim 5.0.0 (Default: Physics)
 webrtc:
@@ -124,15 +125,33 @@ logs:
 shell:
     docker exec -it isaac-sim bash
 
-# Launch Host Driver (Client)
-bridge port="/dev/ttyACM0":
-    @echo "Starting Host Driver (Leader)..."
+# Host real2sim (Leader -> Sim)
+# Usage: `just real2sim` (use profile.json) or `just real2sim /dev/ttyACM1`
+real2sim port="__PROFILE__":
+    @echo "Starting real2sim (Leader -> Sim)..."
     python3 scripts/bridge/host_driver.py --port {{port}}
 
-# Launch Host Driver (Mock Mode)
-bridge-mock:
-    @echo "Starting Host Driver (Mock Mode)..."
+real2sim-mock:
+    @echo "Starting real2sim (Mock Mode)..."
     python3 scripts/bridge/host_driver.py --mock
+
+# Host sim2real (Sim -> Follower)
+# Usage: `just sim2real` (use profile.json) or `just sim2real /dev/ttyACM0`
+sim2real port="__PROFILE__":
+    @echo "Starting sim2real (Sim -> Follower)..."
+    python3 scripts/bridge/follower_driver.py --port {{port}} --enable --timeout-ms 300 --soft-stop-ms 300
+
+sim2real-dry port="__PROFILE__":
+    @echo "Starting sim2real (Dry Run)..."
+    python3 scripts/bridge/follower_driver.py --port {{port}} --timeout-ms 300 --soft-stop-ms 300
+
+# Host real2sim2real (Leader -> Sim -> Follower)
+# Usage: `just real2sim2real` (use profile.json) or `just real2sim2real /dev/ttyACM1 /dev/ttyACM0`
+real2sim2real leader="__PROFILE__" follower="__PROFILE__":
+    @echo "Starting real2sim + sim2real..."
+    python3 scripts/bridge/host_driver.py --port {{leader}} & \
+    python3 scripts/bridge/follower_driver.py --port {{follower}} --enable --timeout-ms 300 --soft-stop-ms 300 & \
+    wait
 
 # Check environment status
 check:
