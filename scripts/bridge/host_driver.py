@@ -148,7 +148,10 @@ def main():
     logger.info("Starting bridge loop... (Press Ctrl+C to stop)")
     
     # Store last smoothed positions to avoid jitter
+    # 注意：若一開始用 0 初始化，重啟 bridge 時會造成關節從 0 漸進到真實角度，
+    # 使 Sim 端看到一段怪異軌跡。這裡改成「首次讀到值就直接 seed」。
     last_smoothed_joints = [0.0] * 6
+    has_seed = [False] * 6
     alpha = 0.3 # Smoothing factor (0.0 to 1.0, lower is smoother)
     
     try:
@@ -178,8 +181,14 @@ def main():
                             # If read fails, use last SMOOTHED value
                             temp_joints.append(last_smoothed_joints[i-1])
                         else:
-                            # Apply Low-Pass Filter
-                            smoothed_val = alpha * val + (1 - alpha) * last_smoothed_joints[i-1]
+                            if not has_seed[i - 1]:
+                                # First valid sample: seed directly to avoid startup transient.
+                                smoothed_val = val
+                                has_seed[i - 1] = True
+                            else:
+                                # Apply Low-Pass Filter
+                                smoothed_val = alpha * val + (1 - alpha) * last_smoothed_joints[i-1]
+
                             temp_joints.append(smoothed_val)
                             last_smoothed_joints[i-1] = smoothed_val
                 else:

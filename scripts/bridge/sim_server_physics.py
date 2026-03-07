@@ -19,8 +19,19 @@ def apply_joint_targets(robot: Any, joints: Sequence[float]) -> None:
   if num_to_set <= 0:
     return
 
+  try:
+    positions = robot.get_joint_positions()
+  except Exception:
+    # Physics Simulation View not ready yet.
+    return
+
+  target_positions = np.asarray(positions)
+  if target_positions.ndim != 1 or target_positions.size < num_to_set:
+    # Can happen right after timeline stop/start.
+    return
+
   # Keep extra DOF unchanged.
-  target_positions = np.array(robot.get_joint_positions(), copy=True)
+  target_positions = np.array(target_positions, copy=True)
   target_positions[:num_to_set] = np.array(joints[:num_to_set])
 
   controller = robot.get_articulation_controller()

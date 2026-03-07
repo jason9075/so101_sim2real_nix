@@ -12,6 +12,9 @@ import logging
 import os
 from typing import Any, Callable, Optional, Sequence
 
+ApplyJointTargetsFn = Callable[[Any, Sequence[float]], None]
+ConfigureRobotFn = Callable[[Any], None]
+
 import numpy as np
 import zmq
 
@@ -290,11 +293,24 @@ def create_world_and_robot(kit: Any) -> tuple[Any, Any, bool]:
   return world, robot, add_ground_plane
 
 
+def drain_socket(socket: zmq.Socket) -> None:
+  while True:
+    try:
+      socket.recv_string(flags=zmq.NOBLOCK)
+    except zmq.Again:
+      return
+
+
 def run_server(
-  apply_joint_targets_fn: Callable[[Any, Sequence[float]], None],
-  configure_robot_fn: Optional[Callable[[Any], None]] = None,
+  apply_joint_targets_fn: ApplyJointTargetsFn,
+  configure_robot_fn: Optional[ConfigureRobotFn] = None,
 ) -> None:
   kit = create_simulation_app()
+
+  import omni.timeline
+
+  timeline = omni.timeline.get_timeline_interface()
+  warmup_frames = int(os.getenv('SO101_WARMUP_FRAMES', '10'))
 
   try:
     socket = setup_zmq_subscriber()
@@ -319,8 +335,55 @@ def run_server(
     except Exception as exc:
       logger.warning(f'Failed to read robot DOF info: {exc}')
 
+    was_playing = False
+    remaining_warmup_frames = 0
+    reset_on_resume = False
+
+    def is_stopped() -> bool:
+      is_stopped_fn = getattr(timeline, 'is_stopped', None)
+      if callable(is_stopped_fn):
+        return bool(is_stopped_fn())
+      return False
+
     while kit.is_running():
+      is_playing = bool(timeline.is_playing())
+
+      if not is_playing:
+        # 停止/暫停時，不套用 teleop（避免 reset 後被舊 target 立刻覆寫）。
+        drain_socket(socket)
+        kit.update()
+        was_playing = False
+
+        # Stop 會重置 simulation view；下次 resume 需要 world.reset().
+        if is_stopped():
+          reset_on_resume = True
+
+        remaining_warmup_frames = warmup_frames
+        continue
+
+      if not was_playing:
+        # Resume：清掉 pause 期間殘留封包，並讓 PhysX 有幾個 frame 穩定。
+        if reset_on_resume:
+          try:
+            world.reset()
+          except Exception as exc:
+            logger.error(f'World Reset Failed: {exc}')
+            return
+
+          if configure_robot_fn is not None:
+            configure_robot_fn(robot)
+
+          reset_on_resume = False
+
+        drain_socket(socket)
+        remaining_warmup_frames = warmup_frames
+        was_playing = True
+
       world.step(render=True)
+
+      if remaining_warmup_frames > 0:
+        remaining_warmup_frames -= 1
+        continue
 
       try:
         joints = receive_latest_joints(socket)

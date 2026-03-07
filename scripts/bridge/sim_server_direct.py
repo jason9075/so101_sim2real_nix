@@ -15,8 +15,16 @@ import sim_server_common
 
 
 def apply_joint_targets(robot: Any, joints: Sequence[float]) -> None:
-  current_positions = robot.get_joint_positions()
-  target_positions = np.array(current_positions, copy=True)
+  try:
+    positions = robot.get_joint_positions()
+  except Exception:
+    return
+
+  target_positions = np.asarray(positions)
+  if target_positions.ndim != 1:
+    return
+
+  target_positions = np.array(target_positions, copy=True)
 
   num_to_set = min(len(joints), robot.num_dof)
   if num_to_set <= 0:
