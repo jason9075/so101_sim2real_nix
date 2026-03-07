@@ -59,16 +59,19 @@ Arm <--> [Serial Interface] : USB /dev/ttyACM* (1Mbps)
     ```
 
 ### 2. Sim Server (Server)
--   **Path**: `scripts/bridge/sim_server.py`
+-   **Path**: `scripts/bridge/sim_server_physics.py` (default) / `scripts/bridge/sim_server_direct.py`
 -   **Role**: Simulation Controller.
 -   **Function**:
     -   Runs inside the Isaac Sim container.
-    -   Loads the robot USD asset (`assets/so101_follower.usd`) or a fallback (Franka).
+    -   Loads the robot USD asset (`assets/so101_follower.usd`) or opens a stage via `ISAAC_STAGE_PATH`.
     -   Subscribes to the **ZMQ SUB** socket on `localhost`.
-    -   Applies received joint angles to the simulated robot using `ArticulationController`.
+    -   Applies received joint angles to the simulated robot:
+        -   `sim_server_physics.py`: PD/position targets (較不易穿透)
+        -   `sim_server_direct.py`: `set_joint_positions()` (反應快但可能穿透)
 -   **Usage**:
     ```bash
-    make sim
+    just gui-bridge          # physics
+    just gui-bridge-direct   # direct
     ```
 
 ## Communication Protocol

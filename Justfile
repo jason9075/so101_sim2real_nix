@@ -24,24 +24,37 @@ gui:
     @echo "Starting Isaac Sim GUI (Forcing X11)..."
     docker exec -it -e WAYLAND_DISPLAY="" isaac-sim /isaac-sim/isaac-sim.sh
 
-# Launch Isaac Sim GUI with Bridge & Robot Preset loaded
+# Launch Isaac Sim GUI with Bridge & Robot Preset loaded (Default: Physics)
 gui-bridge:
     @echo "Installing pyzmq in container (if needed)..."
     docker exec isaac-sim /isaac-sim/python.sh -m pip install pyzmq
-    @echo "Starting Isaac Sim GUI with Bridge..."
+    @echo "Starting Isaac Sim GUI with Bridge (Physics)..."
     docker exec -it \
         -e WAYLAND_DISPLAY="" \
         -e HEADLESS=False \
         -e LD_LIBRARY_PATH=/run/opengl-driver/lib \
         -e NVIDIA_VISIBLE_DEVICES=all \
         -e NVIDIA_DRIVER_CAPABILITIES=all \
-        isaac-sim /isaac-sim/python.sh /isaac-sim/scripts_local/bridge/sim_server.py
+        isaac-sim /isaac-sim/python.sh /isaac-sim/scripts_local/bridge/sim_server_physics.py
 
-# Launch Isaac Sim GUI with Sim2Real stage loaded (sim2real.usd)
+# Launch Isaac Sim GUI with Bridge (Direct: set_joint_positions)
+gui-bridge-direct:
+    @echo "Installing pyzmq in container (if needed)..."
+    docker exec isaac-sim /isaac-sim/python.sh -m pip install pyzmq
+    @echo "Starting Isaac Sim GUI with Bridge (Direct)..."
+    docker exec -it \
+        -e WAYLAND_DISPLAY="" \
+        -e HEADLESS=False \
+        -e LD_LIBRARY_PATH=/run/opengl-driver/lib \
+        -e NVIDIA_VISIBLE_DEVICES=all \
+        -e NVIDIA_DRIVER_CAPABILITIES=all \
+        isaac-sim /isaac-sim/python.sh /isaac-sim/scripts_local/bridge/sim_server_direct.py
+
+# Launch Isaac Sim GUI with Sim2Real stage loaded (Default: Physics)
 gui-sim2real stage="/isaac-sim/assets/sim2real.usd" robot="/World/so101_follower":
     @echo "Installing pyzmq in container (if needed)..."
     docker exec isaac-sim /isaac-sim/python.sh -m pip install pyzmq
-    @echo "Starting Isaac Sim GUI with Sim2Real Stage..."
+    @echo "Starting Isaac Sim GUI with Sim2Real Stage (Physics)..."
     docker exec -it \
         -e WAYLAND_DISPLAY="" \
         -e HEADLESS=False \
@@ -50,13 +63,28 @@ gui-sim2real stage="/isaac-sim/assets/sim2real.usd" robot="/World/so101_follower
         -e LD_LIBRARY_PATH=/run/opengl-driver/lib \
         -e NVIDIA_VISIBLE_DEVICES=all \
         -e NVIDIA_DRIVER_CAPABILITIES=all \
-        isaac-sim /isaac-sim/python.sh /isaac-sim/scripts_local/bridge/sim_server.py
+        isaac-sim /isaac-sim/python.sh /isaac-sim/scripts_local/bridge/sim_server_physics.py
 
-# Launch Sim Server (WebRTC Streaming) - Optimized for Isaac Sim 5.0.0
+# Launch Isaac Sim GUI with Sim2Real stage loaded (Direct: set_joint_positions)
+gui-sim2real-direct stage="/isaac-sim/assets/sim2real.usd" robot="/World/so101_follower":
+    @echo "Installing pyzmq in container (if needed)..."
+    docker exec isaac-sim /isaac-sim/python.sh -m pip install pyzmq
+    @echo "Starting Isaac Sim GUI with Sim2Real Stage (Direct)..."
+    docker exec -it \
+        -e WAYLAND_DISPLAY="" \
+        -e HEADLESS=False \
+        -e ISAAC_STAGE_PATH={{stage}} \
+        -e ROBOT_PRIM_PATH={{robot}} \
+        -e LD_LIBRARY_PATH=/run/opengl-driver/lib \
+        -e NVIDIA_VISIBLE_DEVICES=all \
+        -e NVIDIA_DRIVER_CAPABILITIES=all \
+        isaac-sim /isaac-sim/python.sh /isaac-sim/scripts_local/bridge/sim_server_direct.py
+
+# Launch Sim Server (WebRTC Streaming) - Optimized for Isaac Sim 5.0.0 (Default: Physics)
 webrtc:
     @echo "Installing pyzmq in container (if needed)..."
     docker exec isaac-sim /isaac-sim/python.sh -m pip install pyzmq
-    @echo "Starting Sim Server (WebRTC Mode)..."
+    @echo "Starting Sim Server (WebRTC Mode, Physics)..."
     @echo "----------------------------------------------------------------------------"
     @echo "NOTICE: Use 'Isaac Sim WebRTC Streaming Client' (AppImage/DMG) to connect."
     @echo "Server Address: 127.0.0.1 (Local) or your machine's Public IP."
@@ -69,7 +97,7 @@ webrtc:
         -e LD_LIBRARY_PATH=/run/opengl-driver/lib \
         -e NVIDIA_VISIBLE_DEVICES=all \
         -e NVIDIA_DRIVER_CAPABILITIES=all \
-        isaac-sim /isaac-sim/python.sh /isaac-sim/scripts_local/bridge/sim_server.py \
+        isaac-sim /isaac-sim/python.sh /isaac-sim/scripts_local/bridge/sim_server_physics.py \
         --/app/livestream/enabled=true \
         --/app/livestream/type=webrtc \
         --/app/livestream/port=49100 \
