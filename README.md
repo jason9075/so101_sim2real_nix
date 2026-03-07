@@ -84,7 +84,7 @@ just sim
 
 - **實機模式**: 連接真實手臂
   ```bash
-  just bridge port=/dev/ttyACM0
+  just bridge /dev/ttyACM0
   ```
 
 ## 🛠 常用指令 (Justfile)
