@@ -13,7 +13,7 @@ up:
     @xhost +local:root || true
     @echo "Using DISPLAY=$DISPLAY"
     {{docker_compose}} up -d
-    @echo "Container started in standby mode. Run 'just gui' or 'just sim' to start applications."
+    @echo "Container started in standby mode. Run 'just gui' to start applications."
 
 # Stop Isaac Sim container
 down:
