@@ -2,6 +2,12 @@
 
 本專案致力於在 NixOS 環境下，透過 NVIDIA Isaac Sim 實現 SO-101 機器人手臂的 Sim-to-Real 橋接。
 
+## 🎬 Demo（Real→Sim→Real）
+
+[![Demo（Real→Sim→Real）](https://img.youtube.com/vi/0H6wGFKfvSM/hqdefault.jpg)](https://youtu.be/0H6wGFKfvSM)
+
+- YouTube: <https://youtu.be/0H6wGFKfvSM>
+
 ## 🚀 快速開始
 
 ### 1. 前置需求 (Prerequisites)
