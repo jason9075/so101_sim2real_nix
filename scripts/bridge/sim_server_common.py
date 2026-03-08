@@ -27,11 +27,15 @@ logger = logging.getLogger('SimServer')
 def fix_robot_base(stage: Any, robot_prim_path: str) -> None:
   """嘗試用 PhysicsFixedJoint 固定機器人底座。
 
+  重點：不要把 world anchor 寫死在 (0,0,0)。
+  這裡會用 base link *當下* 的 world pose 當作 FixedJoint 的錨點，
+  讓使用者在 GUI 調整整台 robot 位置後，按下 Play 不會被拉回原點。
+
   注意：若 base link 已經是 static/kinematic，則不應再嘗試建立 FixedJoint，
   否則可能導致 PhysX 初始化失敗。
   """
 
-  from pxr import Gf, Usd, UsdPhysics
+  from pxr import Gf, Usd, UsdGeom, UsdPhysics
 
   prim = stage.GetPrimAtPath(robot_prim_path)
   if not prim.IsValid():
@@ -73,20 +77,33 @@ def fix_robot_base(stage: Any, robot_prim_path: str) -> None:
       )
       return
 
-  logger.info(f'Fixing robot base via FixedJoint on: {base_link_prim.GetPath()}')
+  def get_world_pose() -> tuple[Gf.Vec3f, Gf.Quatf]:
+    xform = UsdGeom.Xformable(base_link_prim).ComputeLocalToWorldTransform(Usd.TimeCode.Default())
+    translation = xform.ExtractTranslation()
+    rotation = xform.ExtractRotation()
+    quatd = rotation.GetQuat()
+    imag = quatd.GetImaginary()
+
+    pos = Gf.Vec3f(float(translation[0]), float(translation[1]), float(translation[2]))
+    rot = Gf.Quatf(float(quatd.GetReal()), float(imag[0]), float(imag[1]), float(imag[2]))
+    return pos, rot
 
   joint_path = f'{base_link_prim.GetPath()}/root_joint'
-  if stage.GetPrimAtPath(joint_path).IsValid():
-    return
+  fixed_joint = UsdPhysics.FixedJoint.Get(stage, joint_path)
+  if not fixed_joint:
+    fixed_joint = UsdPhysics.FixedJoint.Define(stage, joint_path)
 
-  fixed_joint = UsdPhysics.FixedJoint.Define(stage, joint_path)
+  logger.info(f'Fixing robot base via FixedJoint on: {base_link_prim.GetPath()} (joint={joint_path})')
+
+  # body0 不設定表示固定到 world。
   fixed_joint.CreateBody1Rel().SetTargets([base_link_prim.GetPath()])
 
-  # Ensure transform is identity.
-  # fixed_joint.CreateLocalPos0Attr().Set(Gf.Vec3f(0, 0, 0))
-  # fixed_joint.CreateLocalRot0Attr().Set(Gf.Quatf(1, 0, 0, 0))
-  # fixed_joint.CreateLocalPos1Attr().Set(Gf.Vec3f(0, 0, 0))
-  # fixed_joint.CreateLocalRot1Attr().Set(Gf.Quatf(1, 0, 0, 0))
+  # 讓 joint frame（world 端）與 base link（body1 端）在「當下」完全對齊，避免一開始就產生拉扯。
+  pos0, rot0 = get_world_pose()
+  fixed_joint.CreateLocalPos0Attr().Set(pos0)
+  fixed_joint.CreateLocalRot0Attr().Set(rot0)
+  fixed_joint.CreateLocalPos1Attr().Set(Gf.Vec3f(0, 0, 0))
+  fixed_joint.CreateLocalRot1Attr().Set(Gf.Quatf(1, 0, 0, 0))
 
 
 def find_first_articulation_root(stage: Any) -> Optional[str]:
@@ -259,8 +276,8 @@ def resolve_robot_prim_path(
   return robot_prim_path
 
 
-def create_world_and_robot(kit: Any) -> tuple[Any, Any, bool]:
-  """回傳 (world, robot, add_ground_plane)。"""
+def create_world_and_robot(kit: Any) -> tuple[Any, Any, bool, str]:
+  """回傳 (world, robot, add_ground_plane, robot_prim_path)。"""
 
   from omni.isaac.core import World
   from omni.isaac.core.articulations import Articulation
@@ -310,21 +327,23 @@ def create_world_and_robot(kit: Any) -> tuple[Any, Any, bool]:
 
     if os.path.exists(asset_path):
       logger.info(f'Found custom asset at {asset_path}. Loading SO-101...')
-      add_reference_to_stage(usd_path=asset_path, prim_path='/World/SO101')
+      robot_prim_path = '/World/SO101'
+      add_reference_to_stage(usd_path=asset_path, prim_path=robot_prim_path)
 
       stage = get_current_stage()
-      fix_robot_base(stage, '/World/SO101')
+      fix_robot_base(stage, robot_prim_path)
 
-      robot = Articulation(prim_path='/World/SO101', name='so101')
+      robot = Articulation(prim_path=robot_prim_path, name='so101')
       world.scene.add(robot)
     else:
       logger.warning(f'Asset not found at {asset_path}. Fallback to Franka.')
       from omni.isaac.franka import Franka
 
-      robot = Franka(prim_path='/World/Franka', name='franka')
+      robot_prim_path = '/World/Franka'
+      robot = Franka(prim_path=robot_prim_path, name='franka')
       world.scene.add(robot)
 
-  return world, robot, add_ground_plane
+  return world, robot, add_ground_plane, robot_prim_path
 
 
 def drain_socket(socket: zmq.Socket) -> None:
@@ -359,7 +378,7 @@ def run_server(
     pub_interval = 1.0 / float(sim2real_rate_hz)
     next_pub_time = time.monotonic()
 
-    world, robot, add_ground_plane = create_world_and_robot(kit)
+    world, robot, add_ground_plane, robot_prim_path = create_world_and_robot(kit)
 
     if add_ground_plane:
       world.scene.add_default_ground_plane()
@@ -372,6 +391,18 @@ def run_server(
 
     if configure_robot_fn is not None:
       configure_robot_fn(robot)
+
+    from omni.isaac.core.utils.stage import get_current_stage
+
+    def refresh_robot_base_joint() -> None:
+      try:
+        stage = get_current_stage()
+        fix_robot_base(stage, robot_prim_path)
+      except Exception as exc:
+        logger.warning(f'Failed to refresh robot base FixedJoint: {exc}')
+
+    # 確保 FixedJoint anchor 對齊 reset 後的當下 pose。
+    refresh_robot_base_joint()
 
     try:
       logger.info(f'Robot Num DOF: {robot.num_dof}')
@@ -419,6 +450,9 @@ def run_server(
             configure_robot_fn(robot)
 
           reset_on_resume = False
+
+        # Play/resume 前刷新 base anchor，避免被拉回原點。
+        refresh_robot_base_joint()
 
         if sub_socket is not None:
           drain_socket(sub_socket)
